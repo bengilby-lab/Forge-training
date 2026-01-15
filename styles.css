@@ -366,3 +366,12 @@ input:focus,select:focus{border-color: rgba(255,255,255,.22)}
   font-weight: 950;
   letter-spacing: .4px;
 }
+
+
+/* --- v8.8 timer + UI tweaks --- */
+.mmss{display:flex;align-items:center;gap:6px}
+.mmss input{width:68px;text-align:center;font-weight:900}
+.colon{font-family:"Share Tech Mono",ui-monospace,Menlo,monospace;opacity:.8;font-weight:900}
+.modal{background:rgba(0,0,0,.98)!important;backdrop-filter:none!important}
+.modalInner{background:#000!important}
+

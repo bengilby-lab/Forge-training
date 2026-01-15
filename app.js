@@ -65,7 +65,8 @@ function setActiveTab(name){
   store.set("last_view", name);
 }
 tabs.forEach(b => b.addEventListener("click", () => setActiveTab(b.dataset.view)));
-setActiveTab(store.get("last_view","athlete"));
+const lastView = store.get("last_view","athlete");
+setActiveTab((lastView==="coach") ? "athlete" : lastView);
 
 // ---------- Theme switching ----------
 const themeSelect = document.getElementById("themeSelect");
@@ -100,6 +101,16 @@ function ensureAudio(){
     audioCtx = null;
   }
 }
+function speak(text){
+  try{
+    if(!("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05; u.pitch = 1.0; u.volume = 1.0;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
+
 function beep(freq=880, ms=120, vol=0.12){
   try{
     ensureAudio();
@@ -198,6 +209,30 @@ const DB = {
 
 function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 
+function getRM(key){
+  const v = parseFloat(store.get(`rm_${key}`,""));
+  return isNaN(v) ? null : v;
+}
+function pctLoad(rm, pct){
+  if(!rm) return null;
+  const raw = rm * pct;
+  return Math.round(raw / 2.5) * 2.5;
+}
+function strengthLoadHint(move){
+  const m = move.toLowerCase();
+  let key = null;
+  if(m.includes("snatch")) key = "snatch";
+  else if(m.includes("clean")) key = "clean";
+  else if(m.includes("deadlift")) key = "deadlift";
+  else if(m.includes("squat")) key = "squat";
+  else if(m.includes("jerk") || m.includes("press")) key = "pressjerk";
+  const rm = key ? getRM(key) : null;
+  const pct = m.includes("heavy") ? 0.85 : 0.75;
+  const load = pctLoad(rm, pct);
+  return load ? ` @ ~${Math.round(pct*100)}% (~${load}kg)` : "";
+}
+
+
 function pickFocus(focus){
   switch(focus){
     case "Barbell": return [DB.barbell, DB.engine, DB.calisthenics];
@@ -286,9 +321,35 @@ function generateWOD(){
   const type = document.getElementById("wodType").value;
   const focus = document.getElementById("wodFocus").value;
   const level = document.getElementById("wodLevel").value;
+  const phase = (document.getElementById("wodPhase")||{value:"metcon"}).value;
 
   let wod = "";
-  if(type === "EMOM") wod = genEMOM(level, focus);
+  if(phase === "strength"){
+    const lifts = ["Back Squat","Front Squat","Deadlift","Clean & Jerk","Snatch","Shoulder Press / Jerk"];
+    const pickLift = lifts[Math.floor(Math.random()*lifts.length)];
+    let move = pickLift;
+    if(pickLift==="Clean & Jerk") move = "Clean & Jerk 3 reps (heavy)";
+    else if(pickLift==="Snatch") move = "Snatch 3 reps (heavy)";
+    else if(pickLift==="Deadlift") move = "Deadlift 5 reps (heavy)";
+    else if(pickLift==="Back Squat") move = "Back Squat 5 reps (heavy)";
+    else if(pickLift==="Front Squat") move = "Front Squat 5 reps (heavy)";
+    else move = "Shoulder Press / Jerk 5 reps (moderate)";
+    const schemes = [
+      `5 x 3${strengthLoadHint(move)}`,
+      `6 x 2${strengthLoadHint(move)}`,
+      `5 x 5${strengthLoadHint(move.replace("heavy","moderate"))}`
+    ];
+    wod = `Strength Phase\n${pickLift}\n${pick(schemes)}\nRest 2–3 min between sets`;
+    wodOut.textContent = wod;
+    store.set("last_wod", wod);
+    toast("Strength session generated");
+    return;
+  }
+
+  if(phase === "skill"){
+    const skillSet = [pick(DB.skill), pick(DB.gymnastics)];
+    wod = `Skill Phase\n10–12 min practice\n${skillSet.join("\n")}\nKeep quality high`;
+  } else if(type === "EMOM") wod = genEMOM(level, focus);
   else if(type === "For Time") wod = genForTime(level, focus);
   else if(type === "Intervals") wod = genIntervals(level, focus);
   else if(type === "Chipper") wod = genChipper(level, focus);
@@ -434,8 +495,10 @@ const timerSub = document.getElementById("timerSub");
 const clock = document.getElementById("clock");
 const phaseEl = document.getElementById("phase");
 const modeSel = document.getElementById("timerMode");
-const workIn = document.getElementById("timerWork");
-const restIn = document.getElementById("timerRest");
+const workMinIn = document.getElementById("timerWorkMin");
+const workSecIn = document.getElementById("timerWorkSec");
+const restMinIn = document.getElementById("timerRestMin");
+const restSecIn = document.getElementById("timerRestSec");
 const roundsIn = document.getElementById("timerRounds");
 const emomNow = document.getElementById("emomNow");
 const emomNext = document.getElementById("emomNext");
@@ -487,22 +550,25 @@ function setTimerWorkout(text){
   const first = (text.split("\n")[0] || "").toUpperCase();
   if(first.startsWith("EMOM")){
     modeSel.value = "emom";
-    workIn.value = 60;
+    workMinIn.value = 1; workSecIn.value = 0;
     roundsIn.value = 12;
-    restIn.value = 0;
+    restMinIn.value = 0; restSecIn.value = 0;
     timerModePill.textContent = "EMOM";
   }else if(first.startsWith("INTERVALS")){
     modeSel.value = "intervals";
     const m = text.match(/(\d+)\s*s\s*work\s*\/\s*(\d+)\s*s\s*rest/i);
     const r = text.match(/(\d+)\s*rounds/i);
-    if(m){ workIn.value = parseInt(m[1],10); restIn.value = parseInt(m[2],10); }
+    if(m){ const w = parseInt(m[1],10); const r = parseInt(m[2],10);
+    workMinIn.value = Math.floor(w/60); workSecIn.value = w%60;
+    restMinIn.value = Math.floor(r/60); restSecIn.value = r%60; }
     if(r){ roundsIn.value = parseInt(r[1],10); }
     timerModePill.textContent = "Intervals";
   }else if(first.startsWith("AMRAP")){
     modeSel.value = "countdown";
     const m = first.match(/AMRAP\s+(\d+)/);
-    if(m){ workIn.value = parseInt(m[1],10)*60; }
-    restIn.value = 0;
+    if(m){ const total = parseInt(m[1],10)*60;
+    workMinIn.value = Math.floor(total/60); workSecIn.value = total%60; }
+    restMinIn.value = 0; restSecIn.value = 0;
     roundsIn.value = 1;
     timerModePill.textContent = "Countdown";
   }else{
@@ -521,20 +587,33 @@ if(currentWorkout){
 
 function updateFromInputs(){
   curMode = modeSel.value;
-  workSec = parseInt(workIn.value || "0",10) || (curMode==="emom" ? 60 : 60);
-  restSec = parseInt(restIn.value || "0",10) || 0;
+  const wm = parseInt(workMinIn.value||"0",10) || 0;
+  const ws = parseInt(workSecIn.value||"0",10) || 0;
+  const rm = parseInt(restMinIn.value||"0",10) || 0;
+  const rs = parseInt(restSecIn.value||"0",10) || 0;
+  workSec = Math.max(0, wm*60 + Math.min(59, Math.max(0, ws)));
+  restSec = Math.max(0, rm*60 + Math.min(59, Math.max(0, rs)));
   rounds = parseInt(roundsIn.value || "0",10) || (curMode==="emom" ? 12 : 1);
+  if(curMode==="emom"){
+    workSec = 60;
+    workMinIn.value = 1; workSecIn.value = 0;
+    restMinIn.value = 0; restSecIn.value = 0;
+  }
   store.set("timer_mode", curMode);
   store.set("timer_work", workSec);
   store.set("timer_rest", restSec);
   store.set("timer_rounds", rounds);
 }
 modeSel.value = store.get("timer_mode", modeSel.value);
-workIn.value = store.get("timer_work", workIn.value || "");
-restIn.value = store.get("timer_rest", restIn.value || "");
+const storedWork = parseInt(store.get("timer_work","60"),10) || 60;
+workMinIn.value = Math.floor(storedWork/60);
+workSecIn.value = storedWork%60;
+const storedRest = parseInt(store.get("timer_rest","0"),10) || 0;
+restMinIn.value = Math.floor(storedRest/60);
+restSecIn.value = storedRest%60;
 roundsIn.value = store.get("timer_rounds", roundsIn.value || "");
 modeSel.addEventListener("change", () => { updateFromInputs(); updateEmomLines(); });
-[workIn, restIn, roundsIn].forEach(el => el.addEventListener("input", () => { updateFromInputs(); }));
+[workMinIn, workSecIn, restMinIn, restSecIn, roundsIn].forEach(el => el.addEventListener("input", () => { updateFromInputs(); }));
 
 function parseEmomStations(text){
   const lines = text.split("\n").map(s => s.trim());
@@ -581,8 +660,9 @@ function resetTimer(){
   phaseEl.textContent = "—";
   timerModePill.textContent = "Ready";
   setBoxInfo("READY");
-  clock.textContent = formatTime(0);
-
+  updateFromInputs();
+  clock.textContent = (curMode==="stopwatch") ? formatTime(0) : formatTime(workSec);
+  updateEmomLines();
   syncModal();
 }
 function syncModal(){
@@ -636,7 +716,7 @@ function startTimer(){
       const remaining = workSec - dt;
       clock.textContent = formatTime(remaining);
       phaseEl.textContent = "COUNTDOWN";
-      if(remaining <= 10 && remaining > 9.9) beep(880,120,0.16);
+      if(remaining <= 10 && remaining > 9.9){ beep(880,120,0.16); speak("10 seconds"); }
       if(remaining <= 0){
         beep(660,220,0.18);
         stopTimer();
@@ -650,8 +730,8 @@ function startTimer(){
     if(curMode === "emom"){
       const remaining = workSec - (dt % workSec);
       const minuteIndex = Math.floor(dt / workSec) + 1;
-      if(remaining <= 10 && remaining > 9.9) beep(880,120,0.16);
-      if(remaining <= 0.05) beep(520,160,0.18);
+      if(remaining <= 10 && remaining > 9.9){ beep(880,120,0.16); speak("10 seconds"); }
+      if(remaining <= 0.05){ beep(520,120,0.20); setTimeout(()=>beep(660,120,0.16),130); }
 
       clock.textContent = formatTime(remaining);
       phaseEl.textContent = `MIN ${minuteIndex} / ${rounds}`;
@@ -682,8 +762,8 @@ function startTimer(){
       clock.textContent = formatTime(remaining);
       phaseEl.textContent = `${label} • ROUND ${Math.min(idx, rounds)} / ${rounds}`;
 
-      if(remaining <= 10 && remaining > 9.9) beep(inWork ? 880 : 740,120,0.15);
-      if(remaining <= 0.05) beep(inWork ? 520 : 600,160,0.18);
+      if(remaining <= 10 && remaining > 9.9){ beep(inWork ? 880 : 740,120,0.15); speak("10 seconds"); }
+      if(remaining <= 0.05){ if(inWork){ beep(520,120,0.20); setTimeout(()=>beep(660,120,0.16),130); } else { beep(420,140,0.20); setTimeout(()=>beep(520,120,0.16),150); } }
 
       if(idx > rounds){
         beep(660,240,0.20);
@@ -731,8 +811,10 @@ function escapeHtml(s){
 function applyPreset(p){
   try{ ensureAudio(); }catch(e){}
   modeSel.value = p.mode;
-  workIn.value = p.work;
-  restIn.value = p.rest;
+  workMinIn.value = Math.floor(p.work/60);
+  workSecIn.value = p.work%60;
+  restMinIn.value = Math.floor(p.rest/60);
+  restSecIn.value = p.rest%60;
   roundsIn.value = p.rounds;
   updateFromInputs();
   updateEmomLines();

@@ -33,7 +33,6 @@
     <nav class="tabs">
       <button class="tab active" data-view="athlete">Athlete</button>
       <button class="tab" data-view="class">Class</button>
-      <button class="tab" data-view="coach">Coach</button>
       <button class="tab" data-view="timer">Timer</button>
     </nav>
   </header>
@@ -164,6 +163,8 @@
             </select>
           </label>
 
+<label class="field compact"><span>Phase</span><select id="wodPhase"><option value="metcon">Metcon</option><option value="strength">Strength</option><option value="skill">Skill</option></select></label>
+
           <button class="btn primary" id="btnGenWod">Generate</button>
           <button class="btn ghost" id="btnUseForTimer">Use in Timer</button>
         </div>
@@ -174,43 +175,6 @@
           <button class="btn" id="btnRandQuick">🎲 Quick random</button>
           <button class="btn" id="btnCopyWod">Copy</button>
         </div>
-      </section>
-    </section>
-
-    <!-- COACH -->
-    <section id="view-coach" class="view hidden">
-      <section class="card">
-        <div class="cardhead">
-          <h2>🎯 Coach Mode</h2>
-          <div class="pill">Auto rotate</div>
-        </div>
-
-        <div class="coachgrid">
-          <label class="field compact">
-            <span>Auto-rotate</span>
-            <select id="coachAuto">
-              <option value="off">Off</option>
-              <option value="30">Every 30s</option>
-              <option value="60">Every 60s</option>
-              <option value="120">Every 2 min</option>
-            </select>
-          </label>
-          <label class="field compact">
-            <span>Theme</span>
-            <select id="themeSelect">
-              <option value="ember">Ember</option>
-              <option value="neon">Neon</option>
-              <option value="ice">Ice</option>
-            </select>
-          </label>
-        </div>
-
-        <div class="row">
-          <button class="btn primary" id="btnCoachRotate">Rotate now</button>
-          <button class="btn ghost" id="btnCoachAdd">Add AI Class</button>
-        </div>
-
-        <p class="hint">Tip: open on a tablet/TV and leave on Class tab.</p>
       </section>
     </section>
 
@@ -250,15 +214,9 @@
             </select>
           </label>
 
-          <label class="field compact">
-            <span>Work</span>
-            <input id="timerWork" type="number" inputmode="numeric" placeholder="sec (e.g. 60)">
-          </label>
+          <label class="field compact"><span>Work</span><div class="mmss"><input id="timerWorkMin" type="number" inputmode="numeric" placeholder="mm"><span class="colon">:</span><input id="timerWorkSec" type="number" inputmode="numeric" placeholder="ss"></div></label>
 
-          <label class="field compact">
-            <span>Rest</span>
-            <input id="timerRest" type="number" inputmode="numeric" placeholder="sec (e.g. 30)">
-          </label>
+          <label class="field compact"><span>Rest</span><div class="mmss"><input id="timerRestMin" type="number" inputmode="numeric" placeholder="mm"><span class="colon">:</span><input id="timerRestSec" type="number" inputmode="numeric" placeholder="ss"></div></label>
 
           <label class="field compact">
             <span>Rounds</span>
