@@ -16,6 +16,13 @@ window.onerror = function(message, source, lineno, colno, error){
 };
 
 // ---------- Helpers: storage ----------
+function getJSON(key, fallback){
+  try{ return JSON.parse(store.get(key, "")) ?? fallback; }catch(e){ return fallback; }
+}
+function setJSON(key, val){
+  store.set(key, JSON.stringify(val));
+}
+
 const store = {
   get(key, fallback=null){
     const v = localStorage.getItem(key);
@@ -247,6 +254,78 @@ function pickFocus(focus){
 
 // ---------- AI WOD Engine (rules-based) ----------
 const wodOut = document.getElementById("wodOut");
+const historyList = document.getElementById("historyList");
+const historySearch = document.getElementById("historySearch");
+const btnClearHistory = document.getElementById("btnClearHistory");
+
+function loadHistory(){
+  return getJSON("wod_history", []);
+}
+function saveHistory(arr){
+  setJSON("wod_history", arr.slice(0,200));
+}
+function addToHistory(entry){
+  const arr = loadHistory();
+  arr.unshift(entry);
+  saveHistory(arr);
+  renderHistory();
+}
+function toggleFav(id){
+  const arr = loadHistory();
+  const it = arr.find(x=>x.id===id);
+  if(it){ it.fav = !it.fav; saveHistory(arr); renderHistory(); }
+}
+function clearHistory(){
+  saveHistory([]);
+  renderHistory();
+  toast("History cleared");
+}
+function renderHistory(){
+  if(!historyList) return;
+  const q = (historySearch && historySearch.value ? historySearch.value.trim().toLowerCase() : "");
+  const arr = loadHistory();
+  const filtered = q ? arr.filter(x => (x.text||"").toLowerCase().includes(q) || (x.meta||"").toLowerCase().includes(q)) : arr;
+  historyList.innerHTML = filtered.map(x => {
+    const star = x.fav ? "★" : "☆";
+    const when = new Date(x.ts).toLocaleString();
+    return `
+      <div class="hItem">
+        <div class="hHead">
+          <div>
+            <div style="font-weight:950;letter-spacing:.3px">${(x.title||"Workout")} </div>
+            <div class="hMeta">${when} • ${x.meta||""}</div>
+          </div>
+          <button class="btn small star" data-star="${x.id}" type="button">${star}</button>
+        </div>
+        <div class="hText">${escapeHTML(x.text||"")}</div>
+        <div class="hBtns">
+          <button class="btn small" data-load="${x.id}" type="button">Load</button>
+          <button class="btn small" data-timer="${x.id}" type="button">Use in Timer</button>
+          <button class="btn small" data-board="${x.id}" type="button">Push to Board</button>
+        </div>
+      </div>`;
+  }).join("") || `<div class="subtle">No workouts yet. Generate one and it will appear here.</div>`;
+
+  historyList.querySelectorAll("button[data-star]").forEach(b=>b.addEventListener("click",()=>toggleFav(b.getAttribute("data-star"))));
+  historyList.querySelectorAll("button[data-load]").forEach(b=>b.addEventListener("click",()=>{
+    const id=b.getAttribute("data-load");
+    const it=loadHistory().find(x=>x.id===id);
+    if(it){ wodOut.textContent = it.text; toast("Loaded"); }
+  }));
+  historyList.querySelectorAll("button[data-timer]").forEach(b=>b.addEventListener("click",()=>{
+    const id=b.getAttribute("data-timer");
+    const it=loadHistory().find(x=>x.id===id);
+    if(it){ setTimerWorkout(it.text); setActiveTab("timer"); toast("Sent to timer"); }
+  }));
+  historyList.querySelectorAll("button[data-board]").forEach(b=>b.addEventListener("click",()=>{
+    const id=b.getAttribute("data-board");
+    const it=loadHistory().find(x=>x.id===id);
+    if(it){ classBoard.value = it.text; store.set("class_board", classBoard.value); toast("Pushed to board"); }
+  }));
+}
+if(historySearch) historySearch.addEventListener("input", renderHistory);
+if(btnClearHistory) btnClearHistory.addEventListener("click", clearHistory);
+
 // (WOD UI now lives in Class tab, so buttons may not exist until DOM is ready — guard is below.)
 const btnGenWod = document.getElementById("btnGenWod");
 const btnRandQuick = document.getElementById("btnRandQuick");
@@ -343,6 +422,7 @@ function generateWOD(){
     wod = `Strength Phase\n${pickLift}\n${pick(schemes)}\nRest 2–3 min between sets`;
     wodOut.textContent = wod;
     store.set("last_wod", wod);
+    addToHistory({id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random()), ts: Date.now(), title:"Strength", meta:"strength • 1RM-based", text:wod, fav:false});
     toast("Strength session generated");
     return;
   }
@@ -359,6 +439,7 @@ function generateWOD(){
 
   wodOut.textContent = wod;
   store.set("last_wod", wod);
+  addToHistory({id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random()), ts: Date.now(), title: (phase? (phase.charAt(0).toUpperCase()+phase.slice(1)) : "WOD"), meta: `${phase||"metcon"} • ${type||""} • ${focus||""} • ${level||""}`, text: wod, fav:false});
   toast("WOD generated");
 }
 
@@ -836,5 +917,143 @@ bindPreset("preset_fgb", {mode:"emom", work:60, rest:0, rounds:15, title:"Fight 
 bindPreset("preset_cd10", {mode:"countdown", work:600, rest:0, rounds:1, title:"Countdown 10:00"});
 bindPreset("preset_sw", {mode:"stopwatch", work:0, rest:0, rounds:1, title:"Stopwatch"});
 
+
+// ---------- Programming (v8.9) ----------
+const cycleStartIn = document.getElementById("cycleStart");
+const cycleWeekPill = document.getElementById("cycleWeekPill");
+const btnPrevWeek = document.getElementById("btnPrevWeek");
+const btnNextWeek = document.getElementById("btnNextWeek");
+const btnResetWeek = document.getElementById("btnResetWeek");
+const weekGrid = document.getElementById("weekGrid");
+const btnPushDayToBoard = document.getElementById("btnPushDayToBoard");
+const btnPushDayToTimer = document.getElementById("btnPushDayToTimer");
+
+let weekOffset = 0;
+let selectedDayIdx = 0;
+
+function mondayOf(d){
+  const x = new Date(d);
+  const day = x.getDay(); // 0 Sun
+  const diff = (day===0? -6 : 1-day);
+  x.setDate(x.getDate()+diff);
+  x.setHours(0,0,0,0);
+  return x;
+}
+function getCycleStart(){
+  const saved = store.get("cycle_start","");
+  if(saved) return new Date(saved+"T00:00:00");
+  const m = mondayOf(new Date());
+  const iso = m.toISOString().slice(0,10);
+  store.set("cycle_start", iso);
+  return m;
+}
+function setCycleStartISO(iso){
+  store.set("cycle_start", iso);
+}
+function getCycleWeek(){
+  const start = getCycleStart();
+  const now = mondayOf(new Date());
+  const diffDays = Math.floor((now - start) / (1000*60*60*24));
+  const w = Math.max(1, Math.floor(diffDays/7)+1);
+  return w + weekOffset;
+}
+function weekScheme(week){
+  const w = ((week-1) % 4) + 1; // 4-week wave
+  if(w===1) return {name:"Base", sets:5, reps:5, pct:0.72, rest:"2–3 min"};
+  if(w===2) return {name:"Build", sets:5, reps:4, pct:0.78, rest:"2–3 min"};
+  if(w===3) return {name:"Heavy", sets:6, reps:3, pct:0.84, rest:"3 min"};
+  return {name:"Deload", sets:3, reps:5, pct:0.65, rest:"2 min"};
+}
+function scheduleTemplate(){
+  return [
+    {day:"Mon", phase:"Strength + Sprint", lift:"Back Squat", metcon:"8–10 min couplet (fast)"},
+    {day:"Tue", phase:"Skill + Engine", lift:"—", metcon:"Intervals 30–45 min (aerobic)"},
+    {day:"Wed", phase:"Olympic + Intervals", lift:"Clean & Jerk", metcon:"12–18 min intervals"},
+    {day:"Thu", phase:"Gymnastics + Mixed", lift:"—", metcon:"12–16 min triplet"},
+    {day:"Fri", phase:"Strength + Benchmark", lift:"Deadlift", metcon:"Benchmark / spicy"},
+    {day:"Sat", phase:"Team / Long", lift:"—", metcon:"Partner / long chipper"}
+  ];
+}
+function liftKeyFromName(name){
+  const n = name.toLowerCase();
+  if(n.includes("snatch")) return "snatch";
+  if(n.includes("clean")) return "clean";
+  if(n.includes("deadlift")) return "deadlift";
+  if(n.includes("squat")) return "squat";
+  if(n.includes("press") || n.includes("jerk")) return "pressjerk";
+  return null;
+}
+function strengthBlock(liftName, week){
+  const sch = weekScheme(week);
+  const key = liftKeyFromName(liftName);
+  const rm = key ? getRM(key) : null;
+  const load = rm ? pctLoad(rm, sch.pct) : null;
+  const pctTxt = Math.round(sch.pct*100) + "%";
+  const loadTxt = load ? ` (~${load}kg)` : "";
+  return `Strength (${sch.name})\n${liftName}\n${sch.sets} x ${sch.reps} @ ${pctTxt}${loadTxt}\nRest ${sch.rest}`;
+}
+function dayProgramText(dayIdx, week){
+  const tpl = scheduleTemplate()[dayIdx];
+  let out = `${tpl.day} — Week ${week}\n${tpl.phase}\n\n`;
+  if(tpl.lift !== "—"){
+    out += strengthBlock(tpl.lift, week) + "\n\n";
+  }
+  out += `Metcon\n${tpl.metcon}\n`;
+  out += `\nNotes: Scale to quality. Add accessory 8–12 min if time.`;
+  return out;
+}
+function renderWeek(){
+  if(!weekGrid) return;
+  const week = getCycleWeek();
+  if(cycleWeekPill) cycleWeekPill.textContent = `Week ${week}`;
+  const days = scheduleTemplate();
+  weekGrid.innerHTML = days.map((d, i) => {
+    const txt = dayProgramText(i, week);
+    return `<div class="dayCard ${i===selectedDayIdx?'active':''}" data-day="${i}">
+      <div class="dayTop">
+        <div class="dayName">${d.day}</div>
+        <div class="dayPhase">${d.phase}</div>
+      </div>
+      <div class="dayText">${escapeHTML(txt)}</div>
+    </div>`;
+  }).join("");
+  weekGrid.querySelectorAll(".dayCard").forEach(card => {
+    card.addEventListener("click", () => {
+      selectedDayIdx = parseInt(card.getAttribute("data-day"),10);
+      renderWeek();
+    });
+  });
+}
+function initProgramming(){
+  if(cycleStartIn){
+    const cs = store.get("cycle_start","") || new Date().toISOString().slice(0,10);
+    cycleStartIn.value = cs;
+    cycleStartIn.addEventListener("change", e => {
+      setCycleStartISO(e.target.value);
+      weekOffset = 0;
+      renderWeek();
+      toast("Cycle start updated");
+    });
+  }
+  if(btnPrevWeek) btnPrevWeek.addEventListener("click", ()=>{ weekOffset -= 1; renderWeek(); });
+  if(btnNextWeek) btnNextWeek.addEventListener("click", ()=>{ weekOffset += 1; renderWeek(); });
+  if(btnResetWeek) btnResetWeek.addEventListener("click", ()=>{ weekOffset = 0; renderWeek(); toast("Week set to today"); });
+  if(btnPushDayToBoard) btnPushDayToBoard.addEventListener("click", ()=>{
+    const txt = dayProgramText(selectedDayIdx, getCycleWeek());
+    classBoard.value = txt;
+    store.set("class_board", classBoard.value);
+    toast("Pushed to board");
+  });
+  if(btnPushDayToTimer) btnPushDayToTimer.addEventListener("click", ()=>{
+    const txt = dayProgramText(selectedDayIdx, getCycleWeek());
+    setTimerWorkout(txt);
+    setActiveTab("timer");
+    toast("Sent to timer");
+  });
+  renderWeek();
+}
+
 // Final boot
 try{ updateEmomLines(); }catch(e){ console.error(e); }
+try{ renderHistory(); }catch(e){ console.error(e); }
+try{ initProgramming(); }catch(e){ console.error(e); }
