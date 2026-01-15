@@ -221,6 +221,44 @@ function getRM(key){
   const v = parseFloat(store.get(`rm_${key}`,""));
   return isNaN(v) ? null : v;
 }
+function getMax(key){
+  const v = parseInt(store.get(`max_${key}`,""),10);
+  return isNaN(v) ? null : v;
+}
+function scaleGym(text){
+  const m = (text||"").toLowerCase();
+  const pu = getMax("pullups");
+  const hs = getMax("hspu");
+  let out=[];
+  if(m.includes("pull-up") || m.includes("pull up")){
+    if(pu===null) out.push("Pull-ups: banded or ring rows (quality reps)");
+    else if(pu < 5) out.push("Pull-ups: banded / ring rows");
+    else if(pu < 12) out.push("Pull-ups: banded to keep sets unbroken");
+    else out.push("Pull-ups: RX ok");
+  }
+  if(m.includes("hspu") || m.includes("handstand push")){
+    if(hs===null) out.push("HSPU: pike / box HSPU");
+    else if(hs < 5) out.push("HSPU: pike / box");
+    else if(hs < 12) out.push("HSPU: kipping or reduce reps");
+    else out.push("HSPU: RX ok");
+  }
+  return out.length? out: null;
+}
+function scaleBarbell(text){
+  const m = (text||"").toLowerCase();
+  let key=null;
+  if(m.includes("snatch")) key="snatch";
+  else if(m.includes("clean")) key="clean";
+  else if(m.includes("deadlift")) key="deadlift";
+  else if(m.includes("squat")) key="squat";
+  else if(m.includes("jerk")||m.includes("press")) key="pressjerk";
+  if(!key) return null;
+  const rm = getRM(key);
+  if(!rm) return null;
+  const load = pctLoad(rm, 0.55);
+  return load ? `Suggested metcon load: ~55% (${load}kg)` : null;
+}
+
 function pctLoad(rm, pct){
   if(!rm) return null;
   const raw = rm * pct;
@@ -439,6 +477,18 @@ function generateWOD(){
 
   wodOut.textContent = wod;
   store.set("last_wod", wod);
+  /* auto-scaling appendix */
+  try{
+    let scaleLines = [];
+    const bb = scaleBarbell(wod);
+    if(bb) scaleLines.push(bb);
+    const gg = scaleGym(wod);
+    if(gg) scaleLines = scaleLines.concat(gg);
+    if(scaleLines.length){
+      wod += `\n\nScaling\n- ${scaleLines.join("\n- ")}`;
+      wodOut.textContent = wod;
+    }
+  }catch(e){}
   addToHistory({id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random()), ts: Date.now(), title: (phase? (phase.charAt(0).toUpperCase()+phase.slice(1)) : "WOD"), meta: `${phase||"metcon"} • ${type||""} • ${focus||""} • ${level||""}`, text: wod, fav:false});
   toast("WOD generated");
 }
@@ -597,6 +647,7 @@ const modalWorkout = document.getElementById("modalWorkout");
 const modalEmom = document.getElementById("modalEmom");
 document.getElementById("btnCloseBig").addEventListener("click", () => modal.classList.add("hidden"));
 btnBig.addEventListener("click", () => {
+  document.body.classList.add("modalOpen");
   modal.classList.remove("hidden");
   modalWorkout.textContent = currentWorkout || "—";
   modalClock.textContent = clock.textContent;
@@ -965,13 +1016,16 @@ function weekScheme(week){
   return {name:"Deload", sets:3, reps:5, pct:0.65, rest:"2 min"};
 }
 function scheduleTemplate(){
+  const monLift = store.get("lift_mon","Back Squat");
+  const wedLift = store.get("lift_wed","Clean & Jerk");
+  const friLift = store.get("lift_fri","Deadlift");
   return [
-    {day:"Mon", phase:"Strength + Sprint", lift:"Back Squat", metcon:"8–10 min couplet (fast)"},
-    {day:"Tue", phase:"Skill + Engine", lift:"—", metcon:"Intervals 30–45 min (aerobic)"},
-    {day:"Wed", phase:"Olympic + Intervals", lift:"Clean & Jerk", metcon:"12–18 min intervals"},
-    {day:"Thu", phase:"Gymnastics + Mixed", lift:"—", metcon:"12–16 min triplet"},
-    {day:"Fri", phase:"Strength + Benchmark", lift:"Deadlift", metcon:"Benchmark / spicy"},
-    {day:"Sat", phase:"Team / Long", lift:"—", metcon:"Partner / long chipper"}
+    {day:"Mon", phase:"Strength + Sprint", lift:monLift, metcon:"For Time 8–10 min: 21-15-9 (fast)"},
+    {day:"Tue", phase:"Skill + Engine", lift:"—", metcon:"Intervals 30s on / 30s off x 20 (aerobic)"},
+    {day:"Wed", phase:"Olympic + Intervals", lift:wedLift, metcon:"EMOM 12: rotate 3 stations"},
+    {day:"Thu", phase:"Gymnastics + Mixed", lift:"—", metcon:"AMRAP 14: triplet (mixed)"},
+    {day:"Fri", phase:"Strength + Benchmark", lift:friLift, metcon:"BENCHMARK"},
+    {day:"Sat", phase:"Team / Long", lift:"—", metcon:"For Time 25–35 min: partner chipper"}
   ];
 }
 function liftKeyFromName(name){
@@ -992,13 +1046,27 @@ function strengthBlock(liftName, week){
   const loadTxt = load ? ` (~${load}kg)` : "";
   return `Strength (${sch.name})\n${liftName}\n${sch.sets} x ${sch.reps} @ ${pctTxt}${loadTxt}\nRest ${sch.rest}`;
 }
+const BENCHMARKS = ["Fran","Helen","Grace","Cindy","Annie","DT","Nancy","Jackie"];
+
 function dayProgramText(dayIdx, week){
   const tpl = scheduleTemplate()[dayIdx];
   let out = `${tpl.day} — Week ${week}\n${tpl.phase}\n\n`;
   if(tpl.lift !== "—"){
     out += strengthBlock(tpl.lift, week) + "\n\n";
   }
-  out += `Metcon\n${tpl.metcon}\n`;
+  let metconText = tpl.metcon;
+  const wInWave = ((week-1)%4)+1;
+  if(metconText==="BENCHMARK"){
+    if(wInWave===4){
+      const bm = BENCHMARKS[(Math.floor((week-1)/4)) % BENCHMARKS.length];
+      metconText = `Benchmark: ${bm} (scale smart)`;
+    }else{
+      metconText = `For Time 10–14 min: barbell + gymnastics (medium)`;
+    }
+  }
+  out += `Metcon
+${metconText}
+`;
   out += `\nNotes: Scale to quality. Add accessory 8–12 min if time.`;
   return out;
 }
@@ -1025,6 +1093,13 @@ function renderWeek(){
   });
 }
 function initProgramming(){
+  const liftMon = document.getElementById("liftMon");
+  const liftWed = document.getElementById("liftWed");
+  const liftFri = document.getElementById("liftFri");
+  if(liftMon){ liftMon.value = store.get("lift_mon","Back Squat"); liftMon.addEventListener("change", e=>{ store.set("lift_mon", e.target.value); renderWeek(); toast("Mon lift updated"); }); }
+  if(liftWed){ liftWed.value = store.get("lift_wed","Clean & Jerk"); liftWed.addEventListener("change", e=>{ store.set("lift_wed", e.target.value); renderWeek(); toast("Wed lift updated"); }); }
+  if(liftFri){ liftFri.value = store.get("lift_fri","Deadlift"); liftFri.addEventListener("change", e=>{ store.set("lift_fri", e.target.value); renderWeek(); toast("Fri lift updated"); }); }
+
   if(cycleStartIn){
     const cs = store.get("cycle_start","") || new Date().toISOString().slice(0,10);
     cycleStartIn.value = cs;
