@@ -83,9 +83,10 @@ function applyTheme(name){
   store.set("theme", name);
 }
 applyTheme(store.get("theme","ember"));
-themeSelect.value = store.get("theme","ember");
-themeSelect.addEventListener("change", e => applyTheme(e.target.value));
-
+if(themeSelect){
+  themeSelect.value = store.get("theme","ember");
+  themeSelect.addEventListener("change", e => applyTheme(e.target.value));
+}
 // ---------- Audio beeps (WebAudio) ----------
 let audioCtx = null;
 function ensureAudio(){
@@ -463,8 +464,8 @@ function addNewClass(){
 
 document.getElementById("btnRotateClass").addEventListener("click", () => rotateClass());
 document.getElementById("btnAddClass").addEventListener("click", () => addNewClass());
-document.getElementById("btnCoachRotate").addEventListener("click", () => rotateClass());
-document.getElementById("btnCoachAdd").addEventListener("click", () => addNewClass());
+const _btnCoachRotate=document.getElementById("btnCoachRotate"); if(_btnCoachRotate) _btnCoachRotate.addEventListener("click", () => rotateClass());
+const _btnCoachAdd=document.getElementById("btnCoachAdd"); if(_btnCoachAdd) _btnCoachAdd.addEventListener("click", () => addNewClass());
 
 document.getElementById("btnPushToTimer").addEventListener("click", () => {
   const metcon = store.get("class_current_metcon","").trim();
@@ -476,18 +477,17 @@ document.getElementById("btnPushToTimer").addEventListener("click", ensureAudio)
 
 let coachInterval = null;
 const coachAuto = document.getElementById("coachAuto");
-coachAuto.value = store.get("coach_auto","off");
-function setCoachAuto(val){
-  store.set("coach_auto", val);
-  if(coachInterval){ clearInterval(coachInterval); coachInterval = null; }
-  const seconds = val === "off" ? 0 : parseInt(val,10);
-  if(seconds > 0){
-    coachInterval = setInterval(() => rotateClass(), seconds*1000);
+if(coachAuto){
+  coachAuto.value = store.get("coach_auto","off");
+  function setCoachAuto(val){
+    store.set("coach_auto", val);
+    if(coachInterval){ clearInterval(coachInterval); coachInterval = null; }
+    const seconds = val === "off" ? 0 : parseInt(val,10);
+    if(seconds > 0){ coachInterval = setInterval(() => rotateClass(), seconds*1000); }
   }
+  coachAuto.addEventListener("change", e => setCoachAuto(e.target.value));
+  setCoachAuto(coachAuto.value);
 }
-coachAuto.addEventListener("change", e => setCoachAuto(e.target.value));
-setCoachAuto(coachAuto.value);
-
 // ---------- Timer ----------
 const timerModePill = document.getElementById("timerModePill");
 const timerTitle = document.getElementById("timerTitle");
